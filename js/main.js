@@ -48,74 +48,92 @@ yAxis
   .text("Population)");
 
 // line path generator
-let coin, value;
-
-coin = $("#coin-select").val();
-value = $("#var-select").val();
-
 const line = d3
   .line()
   .x((d) => x(d.date))
-  .y((d) => y(d[value]));
+  .y((d) => y(d.value));
+
+// add line to chart
+const linePath = g
+  .append("path")
+  .attr("class", "line")
+  .attr("fill", "none")
+  .attr("stroke", "grey")
+  .attr("stroke-width", "3px");
+
+/******************************** Tooltip Code ********************************/
+const focus = g.append("g").attr("class", "focus").style("display", "none");
+
+focus.append("line").attr("class", "x-hover-line hover-line").attr("y1", 0).attr("y2", HEIGHT);
+
+focus.append("line").attr("class", "y-hover-line hover-line").attr("x1", 0).attr("x2", WIDTH);
+
+focus.append("circle").attr("r", 7.5);
+
+focus.append("text").attr("x", 15).attr("dy", ".31em");
+
+g.append("rect")
+  .attr("class", "overlay")
+  .attr("width", WIDTH)
+  .attr("height", HEIGHT)
+  .on("mouseover", () => focus.style("display", null))
+  .on("mouseout", () => focus.style("display", "none"))
+  .on("mousemove", mousemove);
+
+function mousemove() {
+  const [data] = linePath.data();
+  const x0 = x.invert(d3.mouse(this)[0]);
+  const i = bisectDate(data, x0, 1);
+  const d0 = data[i - 1];
+  const d1 = data[i];
+  const d = x0 - d0.date > d1.date - x0 ? d1 : d0;
+  focus.attr("transform", `translate(${x(d.date)}, ${y(d.value)})`);
+  focus.select("text").text(d.value);
+  focus.select(".x-hover-line").attr("y2", HEIGHT - y(d.value));
+  focus.select(".y-hover-line").attr("x2", -x(d.date));
+}
+/******************************** Tooltip Code ********************************/
+
+const filteredData = {};
 
 d3.json("data/coins.json").then((data) => {
   // clean data
   Object.keys(data).forEach((key) => {
-    data[key].forEach((d) => {
+    filteredData[key] = data[key].map((d) => {
       d.date = parseTime(d.date);
       d["24h_vol"] = Number(d["24h_vol"]);
       d.market_cap = Number(d.market_cap);
       d.price_usd = Number(d.price_usd);
+      return d;
     });
   });
 
+  update();
+});
+
+$("#coin-select").on("change", update);
+$("#var-select").on("change", update);
+
+function update() {
+  const coin = $("#coin-select").val();
+  const value = $("#var-select").val();
+  const data = filteredData[coin]
+    .filter((d) => d[value])
+    .map((d) => ({
+      date: d.date,
+      value: d[value],
+    }));
+  const t = d3.transition().duration(500);
+
   // set scale domains
-  x.domain(d3.extent(data[coin], (d) => d.date));
-  y.domain([d3.min(data[coin], (d) => d[value]) / 1.005, d3.max(data[coin], (d) => d[value]) * 1.005]);
+  x.domain(d3.extent(data, (d) => d.date));
+  y.domain([d3.min(data, (d) => d.value) / 1.005, d3.max(data, (d) => d.value) * 1.005]);
 
   // generate axes once scales have been set
-  xAxis.call(xAxisCall.scale(x));
-  yAxis.call(yAxisCall.scale(y));
+  xAxis.transition(t).call(xAxisCall.scale(x));
+  yAxis.transition(t).call(yAxisCall.scale(y));
 
-  // add line to chart
-  g.append("path")
-    .attr("class", "line")
-    .attr("fill", "none")
-    .attr("stroke", "grey")
-    .attr("stroke-width", "3px")
-    .attr("d", line(data[coin]));
+  linePath.exit().remove();
 
-  /******************************** Tooltip Code ********************************/
-
-  const focus = g.append("g").attr("class", "focus").style("display", "none");
-
-  focus.append("line").attr("class", "x-hover-line hover-line").attr("y1", 0).attr("y2", HEIGHT);
-
-  focus.append("line").attr("class", "y-hover-line hover-line").attr("x1", 0).attr("x2", WIDTH);
-
-  focus.append("circle").attr("r", 7.5);
-
-  focus.append("text").attr("x", 15).attr("dy", ".31em");
-
-  g.append("rect")
-    .attr("class", "overlay")
-    .attr("width", WIDTH)
-    .attr("height", HEIGHT)
-    .on("mouseover", () => focus.style("display", null))
-    .on("mouseout", () => focus.style("display", "none"))
-    .on("mousemove", mousemove);
-
-  function mousemove() {
-    const x0 = x.invert(d3.mouse(this)[0]);
-    const i = bisectDate(data[coin], x0, 1);
-    const d0 = data[coin][i - 1];
-    const d1 = data[coin][i];
-    const d = x0 - d0.date > d1.date - x0 ? d1 : d0;
-    focus.attr("transform", `translate(${x(d.date)}, ${y(d[value])})`);
-    focus.select("text").text(d[value]);
-    focus.select(".x-hover-line").attr("y2", HEIGHT - y(d[value]));
-    focus.select(".y-hover-line").attr("x2", -x(d.date));
-  }
-
-  /******************************** Tooltip Code ********************************/
-});
+  linePath.enter().append("path").merge(linePath).data([data]).transition(t).attr("d", line);
+}
